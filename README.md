@@ -69,7 +69,7 @@ More examples are in `test.js` and `examples/`.
 
 ### Support for promises and `async/await`
 
-Return values are ignored, unless `{ promise: true }` is set in `opts` AND the return value is a promise. In that case, on the remote end a promise is return as well and the resolve/reject callbacks are streamed transparently.
+Return values are ignored, unless `{ promise: true }` is set in `opts` AND the return value is a promise. In that case, on the remote end a promise is returned as well and the resolve/reject callbacks are streamed transparently.
 
 This allows to use `hyperpc` with `async/await`:
 
