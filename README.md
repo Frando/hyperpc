@@ -1,8 +1,8 @@
 # hyperpc
 
-Yet another streaming RPC function. Works over any binary stream and supports callbacks and passing arbitrary streams (both object and binary streams). Also supports returning promises. Uses [multiplex](/maxogden/multiplex) under the hood to float many streams through a single binary stream.
+Yet another streaming RPC function. Works over any binary stream and supports callbacks and passing arbitrary streams (both object and binary streams). Also supports returning promises. Uses [multiplex](https://github.com/maxogden/multiplex) under the hood to float many streams through a single binary stream.
 
-In the spirit of [dnode](/substack/dnode), [rpc-stream](/dominictarr/rpc-stream), [muxrpc](/ssbc/muxrpc) and [rpc-multistream](/biobricks/rpc-multistream).
+In the spirit of [dnode](https://github.com/substack/dnode), [rpc-stream](https://github.com/dominictarr/rpc-stream), [muxrpc](https://github.com/ssbc/muxrpc) and [rpc-multistream](https://github.com/biobricks/rpc-multistream).
 
 ## Installation
 
