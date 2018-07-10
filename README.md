@@ -1,12 +1,18 @@
-# YaRPC
+# hyperpc
 
 Yet another streaming RPC function. Works over any binary stream and supports callbacks and passing arbitrary streams (both object and binary streams). Also supports returning promises. Uses [multiplex](/maxogden/multiplex) under the hood to float many streams through a single binary stream.
 
 In the spirit of [dnode](/substack/dnode), [rpc-stream](/dominictarr/rpc-stream), [muxrpc](/ssbc/muxrpc) and [rpc-multistream](/biobricks/rpc-multistream).
 
+## Installation
+
+`npm install hyperpc`
+
 ## Usage
 
 ```js
+  var hyperpc = require('hyperpc')
+
   var values = ['hello', 'world!']
   var api = {
     upper: (str, cb) => cb(null, str.toUpperCase()),
@@ -19,13 +25,13 @@ In the spirit of [dnode](/substack/dnode), [rpc-stream](/dominictarr/rpc-stream)
     }
   }
 
-  var server = rpc(api)
-  var client = rpc()
+  var server = hyperpc(api)
+  var client = hyperpc()
 
   server.pipe(client).pipe(server)
   // usually, you'd do something like:
-  // server.pipe(someTransportStream).pipe(server)
-  // client.pipe(someTransportStream).pipe(client)
+  // server.pipe(serverSideTransportStream).pipe(server)
+  // clientTransport.pipe(client).pipe(clientTransport)
 
   client.on('remote', (remote) => {
     remote.upper('foo', (err, res) => {
@@ -51,7 +57,7 @@ More examples are in `test.js` and `examples/`.
 
 ## API
 
-### `var stream = yarpc([api], [opts])`
+### `var stream = hyperpc([api], [opts])`
 
 `api` is an object of functions. The functions can be called from the remote site. The implementing side may call any callbacks that are passed. For both the call and the callbacks you may pass readable streams, writable streams, callbacks or errors as args. They all work transparently over the remote connection.
 
@@ -65,10 +71,9 @@ More examples are in `test.js` and `examples/`.
 
 Return values are ignored, unless `{ promise: true }` is set in `opts` AND the return value is a promise. In that case, on the remote end a promise is return as well and the resolve/reject callbacks are streamed transparently.
 
-This allows to use `yarpc` with `async/await`:
+This allows to use `hyperpc` with `async/await`:
 
 ```js
-
   var api = {
     promtest: async function (str) {
       if (!str) throw new Error('no arg')
@@ -76,8 +81,8 @@ This allows to use `yarpc` with `async/await`:
     }
   }
 
-  var server = rpc(api, {promise: true})
-  var client = rpc(null, {promise: true})
+  var server = hyperpc(api, {promise: true})
+  var client = hyperpc(null, {promise: true})
 
   pump(server, client, server)
 

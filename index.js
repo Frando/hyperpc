@@ -17,7 +17,7 @@ var READABLE = 1 // 10
 var WRITABLE = 2 // 01
 var DUPLEX = 1 | 2 // 11
 
-function yarpc (api, opts) {
+function hyperpc (api, opts) {
   opts = Object.assign({}, {
     name: '',
     id: 0,
@@ -354,7 +354,7 @@ function yarpc (api, opts) {
   }
 }
 
-module.exports = yarpc
+module.exports = hyperpc
 
 // Pure helpers.
 

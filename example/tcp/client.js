@@ -1,5 +1,5 @@
 var net = require('net')
-var yarpc = require('../..')
+var hyperpc = require('../..')
 
 var clientApi = {
   updateState: (state) => {
@@ -7,7 +7,7 @@ var clientApi = {
   }
 }
 
-var rpc = yarpc(clientApi, {log: true})
+var rpc = hyperpc(clientApi, {log: true})
 
 var client = new net.Socket()
 client.connect(1337, '127.0.0.1', () => {

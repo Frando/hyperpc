@@ -1,4 +1,4 @@
-var yarpc = require('../..')
+var hyperpc = require('../..')
 var stream = require('stream')
 var net = require('net')
 var fs = require('fs')
@@ -15,10 +15,11 @@ var serverApi = {
       })
       next()
     })
-    // this is needed for yarpc to detect the pumped stream as readable (and not duplex).
+    // this is needed for hyperpc to detect the pumped stream as readable (and not duplex).
     // cb(null, duplexify(null, pump(file, splitAndNumberLines)))
-    // the following will result in errors:
+
     // EDIT: Fixed with a hacky code in streamType() in index.js
+    // now this works:
     var s = pump(file, splitAndNumberLines)
 
     cb(null, s)
@@ -35,7 +36,7 @@ var serverApi = {
   }
 }
 
-var rpc = yarpc(serverApi, {name: 'server', log: true})
+var rpc = hyperpc(serverApi, {name: 'server', log: true})
 
 var server = net.createServer((socket) => {
   socket.setKeepAlive(true)

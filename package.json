@@ -1,7 +1,7 @@
 {
-  "name": "yarpc",
+  "name": "hyperpc",
   "version": "1.0.0",
-  "description": "Yet another RPC over any stream library",
+  "description": "Bidirectional RPC over any stream with callbacks, streams and promises",
   "main": "index.js",
   "directories": {
     "example": "example"
@@ -11,7 +11,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Frando/yarpc.git"
+    "url": "git+https://github.com/Frando/hyperpc.git"
   },
   "keywords": [
     "rpc",
@@ -21,9 +21,9 @@
   "author": "Franz Heinzmann",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/Frando/yarpc/issues"
+    "url": "https://github.com/Frando/hyperpc/issues"
   },
-  "homepage": "https://github.com/Frando/yarpc#readme",
+  "homepage": "https://github.com/Frando/hyperpc#readme",
   "dependencies": {
     "duplexify": "^3.6.0",
     "multiplex": "^6.7.0",
