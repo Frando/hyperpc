@@ -56,7 +56,7 @@ function hyperpc (api, opts) {
   var ready = thunky((cb) => M.on('remote', () => cb()))
   ready()
 
-  M.on('debug', debug)
+  M.on('debug', () => log(state))
 
   return M
 
@@ -107,12 +107,11 @@ function hyperpc (api, opts) {
 
   function handleRequest (data) {
     var [, name, id, args] = data
+
     args = resolveArgs(id, args)
     var ret = state.api[name].apply(state.api[name], args)
 
-    if (opts.promise && isPromise(ret)) {
-      preparePromise(id, ret)
-    }
+    if (opts.promise && isPromise(ret)) preparePromise(id, ret)
   }
 
   function handleResponse (data) {
@@ -217,12 +216,12 @@ function hyperpc (api, opts) {
     var objectMode = isObjectStream(stream)
 
     if (type & READABLE) {
-      var rsM = getSharedStream(id, READABLE, stream)
-      pump(stream, maybeConvert(objectMode, false), rsM)
+      var rsT = getTransportStream(id, READABLE, stream)
+      pump(stream, maybeConvert(objectMode, false), rsT)
     }
     if (type & WRITABLE) {
-      var wsM = getSharedStream(id, WRITABLE, stream)
-      pump(wsM, maybeConvert(false, objectMode), stream)
+      var wsT = getTransportStream(id, WRITABLE, stream)
+      pump(wsT, maybeConvert(false, objectMode), stream)
     }
 
     return [type, objectMode]
@@ -234,13 +233,13 @@ function hyperpc (api, opts) {
 
     if (type & READABLE) {
       var rs = through({objectMode})
-      var rsT = getSharedStream(id, READABLE, rs)
+      var rsT = getTransportStream(id, READABLE, rs)
       pump(rsT, maybeConvert(false, objectMode), rs)
       ds.setReadable(rs)
     }
     if (type & WRITABLE) {
       var ws = through({objectMode})
-      var wsT = getSharedStream(id, WRITABLE, ws)
+      var wsT = getTransportStream(id, WRITABLE, ws)
       pump(ws, maybeConvert(objectMode, false), wsT)
       ds.setWritable(ws)
     }
@@ -248,7 +247,7 @@ function hyperpc (api, opts) {
     return ds
   }
 
-  function onstream (sM, name) {
+  function onstream (sT, name) {
     // stream names are: s-ID-TYPE
     var match = name.match(/^([a-zA-Z0-9.]+)-([0-3]){1}$/)
 
@@ -257,30 +256,19 @@ function hyperpc (api, opts) {
     var id = match[1]
     var type = match[2]
 
-    sM.on('error', (err) => log(name, err))
+    sT.on('error', (err) => log(name, err))
 
-    state.transports[`${id}-${type}`] = sM
+    state.transports[`${id}-${type}`] = sT
   }
 
-  function getSharedStream (id, type, stream) {
+  function getTransportStream (id, type, stream) {
     var sid = `${id}-${type}`
-
-    if (!state.transports[sid]) {
-      state.transports[sid] = M.createSharedStream(sid)
-    }
-
-    state.transports[sid].on('error', (err) => stream.destroy(err))
+    if (!state.transports[sid]) state.transports[sid] = M.createSharedStream(sid)
     return state.transports[sid]
   }
 
   function makeId () {
     return joinIds(state.prefix, state.cnt++)
-  }
-
-  function calculatePrefix (nonce, remoteNonce) {
-    if (remoteNonce > nonce) return 'A'
-    else if (remoteNonce < nonce) return 'B'
-    else return 'X' + (Math.round(Math.random() * 1000))
   }
 
   function getCallback (id) {
@@ -289,7 +277,7 @@ function hyperpc (api, opts) {
 
   function toLog (name) {
     return through.obj(function (chunk, enc, next) {
-      if (opts.log) log(name, Buffer.isBuffer(chunk) ? chunk.toString() : chunk)
+      log(name, Buffer.isBuffer(chunk) ? chunk.toString() : chunk)
       this.push(chunk)
       next()
     })
@@ -300,74 +288,28 @@ function hyperpc (api, opts) {
     var s = state.prefix + (opts.name ? `=${opts.name}` : '')
     console.log('rpcstream [%s]:', s, ...args)
   }
-
-  function debug () {
-    log(state)
-  }
-
-  // stateless funcs
-
-  function maybeConvert (oneInObjMode, twoInObjMode) {
-    if (oneInObjMode && !twoInObjMode) return toBin()
-    if (!oneInObjMode && twoInObjMode) return toObj()
-    if (oneInObjMode && twoInObjMode) return pass(true)
-    if (!oneInObjMode && !twoInObjMode) return pass(false)
-  }
-
-  function pass (objectMode) {
-    return through({objectMode})
-  }
-
-  function toObj () {
-    return through.obj(function (chunk, enc, next) {
-      this.push(JSON.parse(chunk))
-      next()
-    })
-  }
-
-  function toBin () {
-    return through.obj(function (chunk, enc, next) {
-      this.push(JSON.stringify(chunk))
-      next()
-    })
-  }
-
-  function streamType (stream) {
-    var type = 0
-
-    // Special handling for transform streams. If it has no pipes attached,
-    // assume its readable. Otherwise, assume its writable. If this leads
-    // to unexpected behaviors, set up a duplex stream with duplexify and
-    // use either setReadable() or setWritable() to only set up one end.
-    if (isTransform(stream)) {
-      if (typeof stream._readableState === 'object' && !stream._readableState.pipes) {
-        return READABLE
-      } else {
-        return WRITABLE
-      }
-    }
-
-    if (isReadable(stream)) type = type | READABLE
-    if (isWritable(stream)) type = type | WRITABLE
-
-    return type
-  }
 }
 
 module.exports = hyperpc
 
 // Pure helpers.
 
-function isError (arg) {
-  return arg instanceof Error
-}
-
 function joinIds (...ids) {
   return ids.join('.')
 }
 
+function calculatePrefix (nonce, remoteNonce) {
+  if (remoteNonce > nonce) return 'A'
+  else if (remoteNonce < nonce) return 'B'
+  else return 'X' + (Math.round(Math.random() * 1000))
+}
+
 function isFunc (obj) {
   return typeof obj === 'function'
+}
+
+function isError (arg) {
+  return arg instanceof Error
 }
 
 function isPromise (obj) {
@@ -393,4 +335,50 @@ function isTransform (obj) {
 function isObjectStream (stream) {
   if (isWritable(stream)) return stream._writableState.objectMode
   if (isReadable(stream)) return stream._readableState.objectMode
+}
+
+function streamType (stream) {
+  var type = 0
+
+  // Special handling for transform streams. If it has no pipes attached,
+  // assume its readable. Otherwise, assume its writable. If this leads
+  // to unexpected behaviors, set up a duplex stream with duplexify and
+  // use either setReadable() or setWritable() to only set up one end.
+  if (isTransform(stream)) {
+    if (typeof stream._readableState === 'object' && !stream._readableState.pipes) {
+      return READABLE
+    } else {
+      return WRITABLE
+    }
+  }
+
+  if (isReadable(stream)) type = type | READABLE
+  if (isWritable(stream)) type = type | WRITABLE
+
+  return type
+}
+
+function pass (objectMode) {
+  return through({objectMode})
+}
+
+function toObj () {
+  return through.obj(function (chunk, enc, next) {
+    this.push(JSON.parse(chunk))
+    next()
+  })
+}
+
+function toBin () {
+  return through.obj(function (chunk, enc, next) {
+    this.push(JSON.stringify(chunk))
+    next()
+  })
+}
+
+function maybeConvert (oneInObjMode, twoInObjMode) {
+  if (oneInObjMode && !twoInObjMode) return toBin()
+  if (!oneInObjMode && twoInObjMode) return toObj()
+  if (oneInObjMode && twoInObjMode) return pass(true)
+  if (!oneInObjMode && !twoInObjMode) return pass(false)
 }

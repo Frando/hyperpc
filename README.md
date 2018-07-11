@@ -1,6 +1,8 @@
 # hyperpc
 
-Yet another streaming RPC function. Works over any binary stream and supports callbacks and passing arbitrary streams (both object and binary streams). Also supports returning promises. Uses [multiplex](https://github.com/maxogden/multiplex) under the hood to float many streams through a single binary stream.
+Asynchronous bidirectional RPC in Javascript that works over any binary stream. Supports passing both callbacks and arbitrary streams (both in object and binary mode) to the remote end. An optional promise mode allows to return promises and use the remote API with `async`/`await`.
+
+Uses [multiplex](https://github.com/maxogden/multiplex) under the hood to float many streams through a single binary stream.
 
 In the spirit of [dnode](https://github.com/substack/dnode), [rpc-stream](https://github.com/dominictarr/rpc-stream), [muxrpc](https://github.com/ssbc/muxrpc) and [rpc-multistream](https://github.com/biobricks/rpc-multistream).
 
@@ -59,7 +61,7 @@ More examples are in `test.js` and `examples/`.
 
 ### `var stream = hyperpc([api], [opts])`
 
-`api` is an object of functions. The functions can be called from the remote site. The implementing side may call any callbacks that are passed. For both the call and the callbacks you may pass readable streams, writable streams, callbacks or errors as args. They all work transparently over the remote connection.
+`api` is an object of functions. The functions can be called from the remote site. The implementing side may call any callbacks that are passed. For both the call and the callbacks you may pass streams, callbacks or errors as args. They all work transparently over the remote connection. Supported streams are readable streams, writable streams, duplex streams in both object and binary modes. If a transform stream is passed, it is assumed to be a readable stream if 
 
 `opts` and their defaults are:
 
@@ -97,3 +99,14 @@ This allows to use `hyperpc` with `async/await`:
     // prints "HELLO", and would print "no arg" if val were false.
   })
 ```
+
+
+### Motivation
+
+There's many RPC-over-streams modules already. Why another one? First, I wanted to learn streams in-depth. Second, hyperpc uses [multiplex](https://github.com/maxogden/multiplex) under the hood, and supports setting up arbitrary binary streams from both ends, so it should be fast to not only exchange RPC messages, but only binary data streams. No benchmarks though, yet.
+
+A quick comparison to similar modules:
+
+* [dnode](https://github.com/substack/dnode): The oldest kid on the block. Does not support streams as arguments natively though.
+* [muxrpc](https://github.com/ssbc/muxrpc): The preferred streaming RPC in Scuttlebut land. Uses [pull-streams](https://github.com/pull-stream/pull-stream), which I didn't want to include. Needs a manifest, which hyperpc does not.
+* [rpc-multistream](https://github.com/biobricks/rpc-multistream): Similar feature set to *hyperpc*, also uses [multiplex](https://github.com/maxogden/multiplex). hyperpc can be considered a rewrite, with additional suppport for Promises.
