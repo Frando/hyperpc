@@ -105,7 +105,7 @@ This allows to use `hyperpc` with `async/await`:
 
 There's many RPC-over-streams modules already. Why another one? First, I wanted to learn streams in-depth. Second, hyperpc uses [multiplex](https://github.com/maxogden/multiplex) under the hood, and supports setting up arbitrary binary streams from both ends, so it should be fast to not only exchange RPC messages, but only binary data streams. No benchmarks though, yet.
 
-A quick comparison to similar modules:
+Some differences to other great modules in this space:
 
 * [dnode](https://github.com/substack/dnode): The oldest kid on the block. Does not support streams as arguments natively though.
 * [muxrpc](https://github.com/ssbc/muxrpc): The preferred streaming RPC in Scuttlebut land. Uses [pull-streams](https://github.com/pull-stream/pull-stream), which I didn't want to include. Needs a manifest, which hyperpc does not.
