@@ -37,7 +37,7 @@ In the spirit of [dnode](https://github.com/substack/dnode), [rpc-stream](https:
 
   client.on('remote', (remote) => {
     remote.upper('foo', (err, res) => {
-      console.log('res') // FOO
+      console.log(res) // FOO
     })
 
     remote.readStream('bar', (err, rs) => {
@@ -61,7 +61,7 @@ More examples are in `test.js` and `examples/`.
 
 ### `var stream = hyperpc([api], [opts])`
 
-`api` is an object of functions. The functions can be called from the remote site. The implementing side may call any callbacks that are passed. For both the call and the callbacks you may pass streams, callbacks or errors as args. They all work transparently over the remote connection. Supported streams are readable streams, writable streams, duplex streams in both object and binary modes. If a transform stream is passed, it is assumed to be a readable stream if 
+`api` is an object of functions. The functions can be called from the remote site. The implementing side may call any callbacks that are passed. For both the call and the callbacks you may pass streams, callbacks or errors as args. They all work transparently over the remote connection. Supported streams are readable streams, writable streams, duplex streams in both object and binary modes. If a transform stream is passed, it is assumed to be a readable stream if it does not have pipes assigned (i.e. is piped to but not piped from).
 
 `opts` and their defaults are:
 
