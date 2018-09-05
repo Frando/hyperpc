@@ -17,6 +17,11 @@ var READABLE = 1 // 10
 var WRITABLE = 2 // 01
 var DUPLEX = 1 | 2 // 11
 
+var FUNCTION = 1
+var VALUE = 2
+
+var SEPERATOR = '.'
+
 function hyperpc (api, opts) {
   opts = Object.assign({}, {
     name: '',
@@ -48,7 +53,7 @@ function hyperpc (api, opts) {
 
   recv.on('data', handleData)
 
-  send.write([MANIFEST, Object.keys(state.api), state.nonce])
+  sendManifest(state.api)
 
   if (opts.log) pump(send, toLog('send'))
   if (opts.log) pump(recv, toLog('recv'))
@@ -78,20 +83,51 @@ function hyperpc (api, opts) {
     }
   }
 
+  function sendManifest (api) {
+    state.api = api
+    send.write([MANIFEST, makeManifest(state.api), state.nonce])
+  }
+
+  function makeManifest (api) {
+    var manifest = reduce(api)
+    return manifest
+
+    function reduce (obj) {
+      return Object.keys(obj).reduce((manifest, key) => {
+        if (typeof obj[key] === 'function') {
+          manifest[key] = FUNCTION
+        } else if (typeof obj[key] === 'object') {
+          manifest[key] = reduce(obj[key])
+        }
+        return manifest
+      }, {})
+    }
+  }
+
   function handleManifest (data) {
     var [, manifest, remoteNonce] = data
 
     if (!state.prefix) state.prefix = calculatePrefix(state.nonce, remoteNonce)
 
-    state.remote = manifest.reduce((remote, name) => {
-      remote[name] = makeApiCall(name)
-      return remote
-    }, {})
-
+    state.remote = reduce(manifest)
     M.emit('remote', state.remote)
+
+    function reduce (manifest, prefixes) {
+      prefixes = prefixes || []
+      return Object.keys(manifest).reduce((remote, name) => {
+        var path = [...prefixes, name]
+        if (manifest[name] === FUNCTION) {
+          remote[name] = makeApiCall(path)
+        } else if (typeof manifest[name] === 'object') {
+          remote[name] = reduce(manifest[name], path)
+        }
+        return remote
+      }, {})
+    }
   }
 
-  function makeApiCall (name) {
+  function makeApiCall (path) {
+    var name = path.join(SEPERATOR)
     return function () {
       var id = makeId()
       var args = prepareArgs(id, Array.from(arguments))
@@ -109,7 +145,8 @@ function hyperpc (api, opts) {
     var [, name, id, args] = data
 
     args = resolveArgs(id, args)
-    var ret = state.api[name].apply(state.api[name], args)
+    var fn = name.split(SEPERATOR).reduce((api, path) => api[path], state.api)
+    var ret = fn.apply(fn, args)
 
     if (opts.promise && isPromise(ret)) preparePromise(id, ret)
   }
@@ -159,9 +196,11 @@ function hyperpc (api, opts) {
     }
 
     var TYPE_MAP = [
+      // [ MATCH, PREPARE, RESOLVE ]
       [isError, prepareError, resolveError],
       [isFunc, prepareCallback, resolveCallback],
       [isStream, prepareStream, resolveStream],
+      [isBuffer, prepareBuffer, resolveBuffer],
       [() => true, (arg) => arg, (arg) => arg]
     ]
 
@@ -247,8 +286,16 @@ function hyperpc (api, opts) {
     return ds
   }
 
+  function prepareBuffer (buf) {
+    return buf.toString('ascii')
+  }
+
+  function resolveBuffer (string) {
+    return Buffer.from(string, 'ascii')
+  }
+
   function onstream (sT, name) {
-    // stream names are: s-ID-TYPE
+    // stream names are: ID-TYPE
     var match = name.match(/^([a-zA-Z0-9.]+)-([0-3]){1}$/)
 
     if (!match) return console.error('received unrecognized stream: ' + name)
@@ -295,7 +342,7 @@ module.exports = hyperpc
 // Pure helpers.
 
 function joinIds (...ids) {
-  return ids.join('.')
+  return ids.join(SEPERATOR)
 }
 
 function calculatePrefix (nonce, remoteNonce) {
@@ -335,6 +382,14 @@ function isTransform (obj) {
 function isObjectStream (stream) {
   if (isWritable(stream)) return stream._writableState.objectMode
   if (isReadable(stream)) return stream._readableState.objectMode
+}
+
+function isBuffer (buf) {
+  return Buffer.isBuffer(buf)
+}
+
+function isObject (obj) {
+  return Object.isObject(obj)
 }
 
 function streamType (stream) {

@@ -5,13 +5,19 @@ var pump = require('pump')
 var duplexify = require('duplexify')
 var through = require('through2')
 
+function opts (way) {
+  var opts = { debug: true }
+  if (way === 's') opts.name = 'server'
+  if (way === 'c') opts.name = 'client'
+}
+
 tape('basic api calling', function (t) {
   var api = {
     upper: (str, cb) => cb(null, str.toUpperCase())
   }
 
-  var server = rpc(api, {name: 'server'})
-  var client = rpc(null, {name: 'client'})
+  var server = rpc(api, {name: 'server', debug: true})
+  var client = rpc(null, {name: 'client', debug: true})
 
   server.pipe(client).pipe(server)
 
@@ -437,6 +443,87 @@ tape('promises', function (t) {
     })
   })
 })
+
+tape('nested object apis', function (t) {
+  t.plan(4)
+  var api = {
+    foo: {
+      bar: (str, cb) => cb(null, str.toUpperCase())
+    },
+    nested: {
+      in: {
+        two: (a, cb) => cb(null, a * 2)
+      },
+      three: (a, cb) => cb(null, a * 3)
+    }
+  }
+
+  var server = rpc(api, opts('s'))
+  var client = rpc(null, opts('c'))
+  pump(server, client, server)
+
+  client.on('remote', (api) => {
+    api.foo.bar('test', (err, str) => {
+      t.error(err)
+      t.equal(str, 'TEST')
+    })
+    api.nested.in.two(4, (_, val) => t.equal(val, 8))
+    api.nested.three(4, (_, val) => t.equal(val, 12))
+  })
+})
+
+tape('buffer encoding/decoding', function (t) {
+  var api = {
+    getBuf: (cb) => cb(Buffer.from('foo', 'utf8'))
+  }
+  var server = rpc(api, opts('s'))
+  var client = rpc(null, opts('c'))
+  pump(server, client, server)
+  client.on('remote', (api) => {
+    api.getBuf((buf) => {
+      t.equal(Buffer.isBuffer(buf), true)
+      t.equal(buf.toString('utf-8'), 'foo')
+      t.end()
+    })
+  })
+
+})
+
+//     var ApiObj = api.ApiObj('foo')
+//     ApiObj.toUpper('bar', (err, str) {
+//       t.equal(err, null)
+//       t.equal(str, 'fooBAR')
+//     })
+//   })
+
+
+// var proxy = require('./proxy')
+// tape('object proxy', function (t) {
+//   var ApiObj = function (prefix) {
+//     if (!(this instanceof ApiObj)) return new ApiObj()
+//     this.prefix = prefix
+//   }
+//   ApiObj.prototype.toUpper = function (str, cb) {
+//     cb(null, this.prefix + str.toUpperCase())
+//   }
+
+//   var api = {
+//     ApiObj: proxy(ApiObj)
+//   }
+
+//   var server = rpc(api)
+//   var client = rpc(null)
+//   pump(server, client, server)
+
+//   client.on('remote', (api) => {
+//     var ApiObj = api.ApiObj('foo')
+//     ApiObj.toUpper('bar', (err, str) {
+//       t.equal(err, null)
+//       t.equal(str, 'fooBAR')
+//     })
+//   })
+
+// })
 
 // tape.only('split binary stream', function (t) {
 //   var api = {
