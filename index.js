@@ -31,6 +31,8 @@ function hyperpc (api, opts) {
   return rpc.stream
 }
 
+hyperpc.rpcify = rpcify
+
 module.exports = hyperpc
 
 function HypeRPC (api, opts) {
@@ -173,18 +175,12 @@ HypeRPC.prototype.mockConstructor = function (path, manifest) {
     var args = self.prepareArgs(id, Array.from(arguments))
     self.send.push([CALL, name, id, null, args])
 
-    var MockObject = makeMockObject(manifest)
-    return new MockObject()
-
-    function makeMockObject (manifest) {
-      var name = manifest.name
-      this[name] = function () {
-      }
-      manifest.methods.forEach((key) => {
-        this[name].prototype[key] = self.mockFunction(path, [id, key])
-      })
-      return this[name]
-    }
+    var MockConstructor = function () {}
+    manifest.methods.forEach((key) => {
+      MockConstructor.prototype[key] = self.mockFunction(path, [id, key])
+    })
+    Object.defineProperty(MockConstructor, 'name', { value: manifest.name })
+    return new MockConstructor()
   }
 }
 
