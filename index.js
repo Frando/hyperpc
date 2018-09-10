@@ -5,6 +5,8 @@ var thunky = require('thunky')
 var stream = require('stream')
 var pump = require('pump')
 
+var rpcify = require('./rpcify.js')
+
 var MANIFEST = 'M'
 var REQUEST = '>'
 var RESPONSE = '<'
@@ -19,6 +21,8 @@ var DUPLEX = 1 | 2 // 11
 
 var FUNCTION = 1
 var VALUE = 2
+var OBJECT = 3
+var CONSTRUCTOR = 4
 
 var SEPERATOR = '.'
 
@@ -34,6 +38,7 @@ function hyperpc (api, opts) {
     api: api || [],
     remote: null,
     callbacks: {},
+    constructors: {},
     transports: {},
     incoming: {},
     promises: {},
@@ -51,12 +56,12 @@ function hyperpc (api, opts) {
   pump(send, maybeConvert(true, false), rpc)
   pump(rpc, maybeConvert(false, true), recv)
 
+  if (opts.log) pump(send, toLog('send'))
+  if (opts.log) pump(recv, toLog('recv'))
+
   recv.on('data', handleData)
 
   sendManifest(state.api)
-
-  if (opts.log) pump(send, toLog('send'))
-  if (opts.log) pump(recv, toLog('recv'))
 
   var ready = thunky((cb) => M.on('remote', () => cb()))
   ready()
@@ -94,10 +99,14 @@ function hyperpc (api, opts) {
 
     function reduce (obj) {
       return Object.keys(obj).reduce((manifest, key) => {
-        if (typeof obj[key] === 'function') {
-          manifest[key] = FUNCTION
-        } else if (typeof obj[key] === 'object') {
-          manifest[key] = reduce(obj[key])
+        if (obj[key] instanceof rpcify) {
+          manifest[key] = [CONSTRUCTOR, obj[key].toManifest()]
+        } else if (isFunc(obj[key])) {
+          manifest[key] = [FUNCTION]
+        } else if (isObject(obj[key])) {
+          manifest[key] = [OBJECT, reduce(obj[key])]
+        } else if (isLiteral(obj[key])) {
+          manifest[key] = [VALUE, obj[key]]
         }
         return manifest
       }, {})
@@ -116,10 +125,16 @@ function hyperpc (api, opts) {
       prefixes = prefixes || []
       return Object.keys(manifest).reduce((remote, name) => {
         var path = [...prefixes, name]
-        if (manifest[name] === FUNCTION) {
+        var [type, data] = manifest[name]
+
+        if (type === FUNCTION) {
           remote[name] = makeApiCall(path)
-        } else if (typeof manifest[name] === 'object') {
-          remote[name] = reduce(manifest[name], path)
+        } else if (type === OBJECT) {
+          remote[name] = reduce(data, path)
+        } else if (type === VALUE) {
+          remote[name] = data
+        } else if (type === CONSTRUCTOR) {
+          remote[name] = makeConstructorAndApiCall(path, data)
         }
         return remote
       }, {})
@@ -131,7 +146,7 @@ function hyperpc (api, opts) {
     return function () {
       var id = makeId()
       var args = prepareArgs(id, Array.from(arguments))
-      send.push([REQUEST, name, id, args])
+      send.push([REQUEST, name, id, null, args])
 
       if (opts.promise) {
         return new Promise((resolve, reject) => {
@@ -141,14 +156,62 @@ function hyperpc (api, opts) {
     }
   }
 
+  function makeObjectApiCall (path, method) {
+    var name = path.join(SEPERATOR)
+    return function () {
+      var id = makeId()
+      var args = prepareArgs(id, Array.from(arguments))
+      send.push([REQUEST, name, id, method, args])
+
+      if (opts.promise) {
+        return new Promise((resolve, reject) => {
+          state.promises[id] = [resolve, reject]
+        })
+      }
+    }
+  }
+
+  function makeConstructorAndApiCall (path, manifest) {
+    var name = path.join(SEPERATOR)
+    var fn = function () {
+      var id = makeId()
+
+      var args = prepareArgs(id, Array.from(arguments))
+      send.push([REQUEST, name, id, null, args])
+
+      var Obj = makeConstructor(manifest)
+      return new Obj()
+
+      function makeConstructor (manifest) {
+        var name = manifest.name
+        this[name] = function () {
+        }
+        manifest.methods.forEach((key) => {
+          this[name].prototype[key] = makeObjectApiCall(path, [id, key])
+        })
+        return this[name]
+      }
+    }
+    return fn
+  }
+
   function handleRequest (data) {
-    var [, name, id, args] = data
+    var [, name, id, method, args] = data
 
     args = resolveArgs(id, args)
     var fn = name.split(SEPERATOR).reduce((api, path) => api[path], state.api)
-    var ret = fn.apply(fn, args)
 
-    if (opts.promise && isPromise(ret)) preparePromise(id, ret)
+    var ret
+    if (fn instanceof rpcify) {
+      if (method === null) {
+        return fn.makeNew(id, args)
+      } else {
+        fn.makeCall(method, args)
+      }
+    } else {
+      ret = fn.apply(fn, args)
+      if (opts.promise && isPromise(ret)) preparePromise(id, ret)
+    }
   }
 
   function handleResponse (data) {
@@ -389,7 +452,11 @@ function isBuffer (buf) {
 }
 
 function isObject (obj) {
-  return Object.isObject(obj)
+  return (typeof obj === 'object')
+}
+
+function isLiteral (val) {
+  return (typeof val === 'boolean' || typeof val === 'string' || typeof val === 'number')
 }
 
 function streamType (stream) {

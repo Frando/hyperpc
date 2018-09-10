@@ -1,5 +1,5 @@
 var tape = require('tape')
-var rpc = require('.')
+var rpc = require('..')
 var stream = require('stream')
 var pump = require('pump')
 var duplexify = require('duplexify')

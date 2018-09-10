@@ -7,7 +7,7 @@
     "example": "example"
   },
   "scripts": {
-    "test": "tape test.js"
+    "test": "tape test/**"
   },
   "repository": {
     "type": "git",
