@@ -1,6 +1,6 @@
 {
   "name": "hyperpc",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Bidirectional RPC over any stream with callbacks, streams and promises",
   "main": "index.js",
   "directories": {
