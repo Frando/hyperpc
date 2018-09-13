@@ -50,7 +50,7 @@ function HypeRPC (api, opts) {
 
   this.remote = null
   this.callbacks = {}
-  this.constructors = {}
+  this.objects = {}
   this.transports = {}
   this.incoming = {}
   this.promises = {}
@@ -152,7 +152,7 @@ HypeRPC.prototype.onManifest = function (data) {
 HypeRPC.prototype.mockFunction = function (path, opts) {
   var self = this
   opts = opts || null
-  var name = path.join(SEPERATOR)
+  var name = path ? path.join(SEPERATOR) : null
   return function () {
     var id = self.makeId()
     var args = self.prepareArgs(id, Array.from(arguments))
@@ -188,7 +188,15 @@ HypeRPC.prototype.onCall = function (data) {
   var [name, id, opts, args] = data
 
   args = this.resolveArgs(id, args)
-  var func = name.split(SEPERATOR).reduce((api, path) => api[path], this.api)
+
+  var func, obj
+  if (!name && opts.objectId) {
+    obj = this.objects[opts.objectId]
+    func = obj[opts.method]
+  } else {
+    func = name.split(SEPERATOR).reduce((api, path) => api[path], this.api)
+    obj = func
+  }
 
   var ret
   if (func instanceof rpcify) {
@@ -198,7 +206,7 @@ HypeRPC.prototype.onCall = function (data) {
       ret = func.makeCall(opts, args)
     }
   } else {
-    ret = func.apply(func, args)
+    ret = func.apply(obj, args)
   }
 
   if (this.promise && isPromise(ret)) this.preparePromise(id, ret)
@@ -251,6 +259,7 @@ HypeRPC.prototype.convertArgs = function (step, id, args) {
 
   var CONVERSION_MAP = [
     // [ MATCH, PREPARE, RESOLVE ]
+    [isRpcified, this.prepareRpcified, this.resolveRpcified],
     [isError, this.prepareError, this.resolveError],
     [isFunc, this.prepareCallback, this.resolveCallback],
     [isStream, this.prepareStream, this.resolveStream],
@@ -273,6 +282,25 @@ HypeRPC.prototype.convertArgs = function (step, id, args) {
     var [type, data] = arg
     return CONVERSION_MAP[type][RESOLVE].apply(self, [data, joinIds(id, i)])
   }
+}
+
+HypeRPC.prototype.prepareRpcified = function (arg, id) {
+  this.objects[id] = arg.Cr
+  return arg.toManifest()
+}
+
+HypeRPC.prototype.resolveRpcified = function (spec, id) {
+  var self = this
+  // var args = self.prepareArgs(id, Array.from(arguments))
+  var MockConstructor = function () {}
+  spec.methods.forEach((key) => {
+    MockConstructor.prototype[key] = self.mockFunction(null, {
+      objectId: id,
+      method: key
+    })
+  })
+  Object.defineProperty(MockConstructor, 'name', { value: spec.name })
+  return new MockConstructor()
 }
 
 HypeRPC.prototype.prepareError = function (arg) {
@@ -407,6 +435,10 @@ function isFunc (obj) {
 
 function isError (arg) {
   return arg instanceof Error
+}
+
+function isRpcified (arg) {
+  return arg instanceof rpcify
 }
 
 function isPromise (obj) {

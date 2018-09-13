@@ -5,7 +5,9 @@ function RPCify (constructor, opts) {
   this.Cr = constructor
   this.opts = Object.assign({
     skipPrivate: true,
-    methods: null,
+    include: null,
+    exclude: [],
+    override: {},
     factory: null,
     check: null
   }, opts)
@@ -14,18 +16,29 @@ function RPCify (constructor, opts) {
 
 RPCify.prototype.toManifest = function () {
   var methods = []
-
   var keys
-  if (this.opts.methods) keys = this.opts.methods
+
+  var proto = this.Cr.prototype
+  if (!proto) proto = Object.getPrototypeOf(this.Cr)
+
+  if (this.opts.include) keys = this.opts.include
   else {
-    keys = Object.keys(this.Cr.prototype).filter((key) => {
-      if (this.opts.skipPrivate) return key.substr(0, 1) !== '_'
-      else return true
+    keys = Object.keys(proto).filter((key) => {
+      if (this.opts.include) {
+        return this.opts.include.indexOf(key) !== -1
+      }
+      if (this.opts.skipPrivate && key.substr(0, 1) ==='_') {
+        return false
+      }
+      if (this.opts.exclude.indexOf(key) !== -1) {
+        return false
+      }
+      return true
     })
   }
 
   keys.forEach((key) => {
-    if (typeof this.Cr.prototype[key] === 'function') {
+    if (typeof proto[key] === 'function') {
       methods.push(key)
     }
   })
@@ -56,7 +69,11 @@ RPCify.prototype.makeCall = function (method, args) {
     var result = this.opts.check(this.cache[id], name, args)
     if (!result) return
   }
-  this.cache[id][name].apply(this.cache[id], args)
+  if (this.opts.override[name]) {
+    this.opts.override[name].apply(this.cache[id], args)
+  } else {
+    this.cache[id][name].apply(this.cache[id], args)
+  }
 }
 
 module.exports = RPCify

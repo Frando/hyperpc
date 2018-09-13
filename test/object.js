@@ -81,10 +81,10 @@ tape('include private', function (t) {
 })
 
 tape('limit api', function (t) {
-  t.plan(2)
   var api = {
     upper: (str, cb) => cb(null, str.toUpperCase()),
-    myclass: rpcify(MyClass, {methods: ['getUpper']})
+    myclass: rpcify(MyClass, {include: ['getUpper']}),
+    myclass2: rpcify(MyClass, {exclude: ['getUpper']})
   }
 
   var server = rpc(api)
@@ -96,11 +96,14 @@ tape('limit api', function (t) {
     var myobj1 = remote.myclass('moon')
     t.equal(typeof myobj1.getUpper, 'function', 'method included')
     t.equal(typeof myobj1.setPrefix, 'undefined', 'method skipped')
+    var myobj2 = remote.myclass2('moon')
+    t.equal(typeof myobj2.getUpper, 'undefined', 'method included')
+    t.equal(typeof myobj2.setPrefix, 'function', 'method skipped')
+    t.end()
   })
 })
 
 tape('check access', function (t) {
-  t.plan(3)
   var api = {
     upper: (str, cb) => cb(null, str.toUpperCase()),
     myclass: rpcify(MyClass, { check: check })
@@ -124,5 +127,31 @@ tape('check access', function (t) {
     myobj1.getUpper('x', (str) => t.equal(str, 'FOOKEYX', 'check worked'))
     myobj1.setPrefix('bar')
     myobj1.getUpper('x', (str) => t.equal(str, 'BARKEYX', 'normal prefix works again'))
+    t.end()
+  })
+})
+
+tape('return rpcified objects', function (t) {
+  // server
+  var obj = {
+    first: MyClass('hello'),
+    second: MyClass('world')
+  }
+  var api = {
+    getObj: (id, cb) => {
+      cb(null, rpcify(obj[id]))
+    }
+  }
+  var server = rpc(api)
+  var client = rpc()
+  pump(server, client, server)
+  client.on('remote', (remote) => {
+    remote.getObj('first', (err, obj) => {
+      t.error(err)
+      obj.getUpper('!', (str) => {
+        t.equal(str, 'HELLO!', 'string matches')
+        t.end()
+      })
+    })
   })
 })
