@@ -1,6 +1,6 @@
 # hyperpc
 
-Asynchronous bidirectional RPC in Javascript that works over any binary stream. Supports passing both callbacks and arbitrary streams (both in object and binary mode) to the remote end. An optional promise mode allows to return promises and use the remote API with `async`/`await`.
+Asynchronous bidirectional RPC in Javascript that works over any binary stream. Supports passing both callbacks and arbitrary streams (both in object and binary mode) to the remote end. An optional promise mode allows to return promises and use the remote API with `async`/`await`. Also supports rpcifying objects and constructors.
 
 Uses [multiplex](https://github.com/maxogden/multiplex) under the hood to float many streams through a single binary stream.
 
@@ -68,6 +68,10 @@ More examples are in `test.js` and `examples/`.
 * `log: false`: Enable debug mode. Log all messages to `console.log`
 * `name: null`: Set a name for this end of the connection. Only used in log mode.
 * `promise: false`: Support returning promises (experimental)
+
+### RPCifying objects
+
+hyperpc supports passing classes (functions with constructors) or instances (objects with bound function properties) through a helper, `hyperpc.rpcify`, to make transparent calls to the instance on the backend. See `test/object.js` for examples.
 
 ### Support for promises and `async/await`
 
