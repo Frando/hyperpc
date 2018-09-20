@@ -4,20 +4,14 @@ var through = require('through2')
 var thunky = require('thunky')
 var stream = require('stream')
 var pump = require('pump')
+// var debug = require('debug')
 
+var m = require('./messages.js')
 var rpcify = require('./rpcify.js')
-
-var MANIFEST = 1
-var CALL = 2
-var FULFIL_CALLBACK = 3
-var FULFIL_PROMISE = 4
-
-var PROMISE_RESOLVE = 0
-var PROMISE_REJECT = 1
 
 var READABLE = 1 // 10
 var WRITABLE = 2 // 01
-var DUPLEX = 1 | 2 // 11
+// var DUPLEX = 1 | 2 // 11
 
 var FUNCTION = 1
 var VALUE = 2
@@ -60,14 +54,11 @@ function HypeRPC (api, opts) {
   this.stream = multiplex({objectMode: false}, this.onstream.bind(this))
 
   var rpc = this.stream.createSharedStream('rpc')
-  this.send = through.obj()
-  this.recv = through.obj()
+  this.send = through()
+  this.recv = through()
 
-  pump(this.send, maybeConvert(true, false), rpc)
-  pump(rpc, maybeConvert(false, true), this.recv)
-
-  if (opts.log) pump(this.send, this.toLog('send'))
-  if (opts.log) pump(this.recv, this.toLog('recv'))
+  pump(this.send, rpc)
+  pump(rpc, this.recv)
 
   this.recv.on('data', this.onData.bind(this))
 
@@ -79,25 +70,39 @@ function HypeRPC (api, opts) {
 
 HypeRPC.prototype.onData = function (data) {
   var self = this
-  var [type, ...params] = data
-  switch (type) {
-    case MANIFEST:
-      this.onManifest(params)
+  var msg = m.Msg.decode(data)
+  if (this.debug) this.log('in', msg)
+
+  switch (msg.type) {
+    case m.TYPE.MANIFEST:
+      this.onManifest(msg.manifest)
       break
-    case CALL:
-      this.ready(() => self.onCall(params))
+    case m.TYPE.CALL:
+      this.ready(() => self.onCall(msg.call))
       break
-    case FULFIL_CALLBACK:
-      this.ready(() => self.fulfilCallback(params))
-      break
-    case FULFIL_PROMISE:
-      if (this.promise) this.ready(() => self.fulfilPromise(params))
+    case m.TYPE.RETURN:
+      this.ready(() => self.onReturn(msg.return))
       break
   }
 }
 
+HypeRPC.prototype.send = function (data) {
+  this.send.write(data)
+}
+
+HypeRPC.prototype.sendMsg = function (msg) {
+  if (this.debug) this.log('out', msg)
+  this.send.write(m.Msg.encode(msg))
+}
+
 HypeRPC.prototype.sendManifest = function () {
-  this.send.write([MANIFEST, this.makeManifest(), this.nonce])
+  this.sendMsg({
+    type: m.TYPE.MANIFEST,
+    manifest: {
+      manifest: JSON.stringify(this.makeManifest()),
+      nonce: this.nonce
+    }
+  })
 }
 
 HypeRPC.prototype.makeManifest = function () {
@@ -120,9 +125,10 @@ HypeRPC.prototype.makeManifest = function () {
   }
 }
 
-HypeRPC.prototype.onManifest = function (data) {
+HypeRPC.prototype.onManifest = function (msg) {
   var self = this
-  var [manifest, remoteNonce] = data
+  var manifest = JSON.parse(msg.manifest)
+  var remoteNonce = msg.nonce
 
   if (!this.prefix) this.prefix = calculatePrefix(this.nonce, remoteNonce)
 
@@ -149,14 +155,22 @@ HypeRPC.prototype.onManifest = function (data) {
   }
 }
 
-HypeRPC.prototype.mockFunction = function (path, opts) {
+HypeRPC.prototype.mockFunction = function (path, objectid, method) {
   var self = this
-  opts = opts || null
-  var name = path ? path.join(SEPERATOR) : null
+  var name, type
+  if (path) {
+    type = m.CALL.API
+    name = path.join(SEPERATOR)
+  } else {
+    type = m.CALL.OBJECT
+  }
   return function () {
     var id = self.makeId()
     var args = self.prepareArgs(id, Array.from(arguments))
-    self.send.push([CALL, name, id, opts, args])
+    self.sendMsg({
+      type: m.TYPE.CALL,
+      call: { type, id, name, objectid, method, args }
+    })
 
     if (self.promise) {
       return new Promise((resolve, reject) => {
@@ -173,67 +187,79 @@ HypeRPC.prototype.mockConstructor = function (path, manifest) {
     var id = self.makeId()
 
     var args = self.prepareArgs(id, Array.from(arguments))
-    self.send.push([CALL, name, id, null, args])
+    self.sendMsg({
+      type: m.TYPE.CALL,
+      call: { type: m.CALL.API, id, name, args }
+    })
 
     var MockConstructor = function () {}
-    manifest.methods.forEach((key) => {
-      MockConstructor.prototype[key] = self.mockFunction(path, [id, key])
+    manifest.methods.forEach((method) => {
+      MockConstructor.prototype[method] = self.mockFunction(path, id, method)
     })
     Object.defineProperty(MockConstructor, 'name', { value: manifest.name })
     return new MockConstructor()
   }
 }
 
-HypeRPC.prototype.onCall = function (data) {
-  var [name, id, opts, args] = data
+HypeRPC.prototype.onCall = function (msg) {
+  var { type, id, name, objectid, method, args } = msg
 
   args = this.resolveArgs(id, args)
 
-  var func, obj
-  if (!name && opts.objectId) {
-    obj = this.objects[opts.objectId]
-    func = obj[opts.method]
-  } else {
-    func = name.split(SEPERATOR).reduce((api, path) => api[path], this.api)
-    obj = func
-  }
-
   var ret
-  if (func instanceof rpcify) {
-    if (opts === null) {
-      return func.makeNew(id, args)
-    } else {
-      ret = func.makeCall(opts, args)
-    }
-  } else {
-    ret = func.apply(obj, args)
+  switch (type) {
+    case m.CALL.OBJECT:
+      ret = this.objects[objectid].makeCall(method, objectid, args)
+      break
+
+    case m.CALL.API:
+      var obj = name.split(SEPERATOR).reduce((api, path) => api[path], this.api)
+      if (obj instanceof rpcify) {
+        if (objectid) ret = obj.makeCall(method, objectid, args)
+        else ret = obj.makeNew(id, args)
+      } else {
+        ret = obj.apply(obj, args)
+      }
+      break
   }
 
   if (this.promise && isPromise(ret)) this.preparePromise(id, ret)
 }
 
-HypeRPC.prototype.fulfilCallback = function (data) {
-  var [id, args] = data
-  var func = this.callbacks[id]
-  if (!func) return this.log(`Invalid callback ${id}`)
-  func.apply(func, this.resolveArgs(id, args))
-}
+HypeRPC.prototype.onReturn = function (msg) {
+  var { id, args, type } = msg
 
-HypeRPC.prototype.fulfilPromise = function (data) {
-  var [id, type, args] = data
-  if (!this.promises[id]) return
   args = this.resolveArgs(id, args)
-  this.promises[id][type].apply(this.promises[id][type], args)
+
+  switch (type) {
+    case m.RETURN.CALLBACK:
+      var func = this.callbacks[id]
+      func.apply(func, args)
+      break
+    case m.RETURN.PROMISE:
+      var promise = this.promises[id]
+      var res = msg.promise
+      promise[res].apply(promise[res], args)
+      break
+  }
 }
 
 HypeRPC.prototype.preparePromise = function (id, promise) {
   var self = this
-  promise.then(handle(PROMISE_RESOLVE), handle(PROMISE_REJECT))
+  promise.then(handle(m.PROMISE.RESOLVE), handle(m.PROMISE.REJECT))
 
-  function handle (type) {
+  function handle (result) {
     return function () {
       var args = self.prepareArgs(id, Array.from(arguments))
-      self.send.push([FULFIL_PROMISE, id, type, args])
+      self.sendMsg({
+        type: m.TYPE.RETURN,
+        return: {
+          type: m.RETURN.PROMISE,
+          id,
+          args,
+          promise: result
+        }
+      })
     }
   }
 }
@@ -248,9 +274,10 @@ HypeRPC.prototype.prepareArgs = function (id, args) {
 
 HypeRPC.prototype.convertArgs = function (step, id, args) {
   var self = this
-  var MATCH = 0
-  var PREPARE = 1
-  var RESOLVE = 2
+  var TYPE = 0
+  var MATCH = 1
+  var PREPARE = 2
+  var RESOLVE = 3
 
   var STEPS = {
     prepare: prepareArg,
@@ -258,53 +285,55 @@ HypeRPC.prototype.convertArgs = function (step, id, args) {
   }
 
   var CONVERSION_MAP = [
-    // [ MATCH, PREPARE, RESOLVE ]
-    [isRpcified, this.prepareRpcified, this.resolveRpcified],
-    [isError, this.prepareError, this.resolveError],
-    [isFunc, this.prepareCallback, this.resolveCallback],
-    [isStream, this.prepareStream, this.resolveStream],
-    [isBuffer, this.prepareBuffer, this.resolveBuffer],
-    [() => true, (arg) => arg, (arg) => arg]
+    // [ TYPE, MATCH, PREPARE, RESOLVE ]
+    [m.ARGUMENT.RPCIFIED, isRpcified, this.prepareRpcified, this.resolveRpcified],
+    [m.ARGUMENT.ERROR, isError, this.prepareError, this.resolveError],
+    [m.ARGUMENT.CALLBACK, isFunc, this.prepareCallback, this.resolveCallback],
+    [m.ARGUMENT.STREAM, isStream, this.prepareStream, this.resolveStream],
+    [m.ARGUMENT.BYTES, isBuffer, this.prepareBuffer, this.resolveBuffer],
+    [m.ARGUMENT.JSON, () => true, (arg) => ({ json: JSON.stringify(arg) }), (arg) => JSON.parse(arg.json)]
   ]
 
   return args.map((arg, i) => STEPS[step](arg, id, i))
 
   function prepareArg (arg, id, i) {
-    return CONVERSION_MAP.reduce((preparedArg, functions, type) => {
-      if (preparedArg === null && functions[MATCH](arg)) {
-        preparedArg = [type, functions[PREPARE].apply(self, [arg, joinIds(id, i)])]
+    return CONVERSION_MAP.reduce((preparedArg, info, type) => {
+      if (preparedArg === null && info[MATCH](arg)) {
+        preparedArg = info[PREPARE].apply(self, [arg, joinIds(id, i)])
+        preparedArg.type = info[TYPE]
       }
       return preparedArg
     }, null)
   }
 
   function resolveArg (arg, id, i) {
-    var [type, data] = arg
-    return CONVERSION_MAP[type][RESOLVE].apply(self, [data, joinIds(id, i)])
+    var group = CONVERSION_MAP.filter(group => group[0] === arg.type)[0]
+    return group[RESOLVE].apply(self, [arg, joinIds(id, i)])
   }
 }
 
 HypeRPC.prototype.prepareRpcified = function (arg, id) {
-  this.objects[id] = arg.Cr
-  return arg.toManifest()
+  this.objects[id] = arg
+  return {
+    rpcified: {
+      manifest: JSON.stringify(arg.toManifest())
+    }
+  }
 }
 
-HypeRPC.prototype.resolveRpcified = function (spec, id) {
+HypeRPC.prototype.resolveRpcified = function (arg, id) {
   var self = this
-  // var args = self.prepareArgs(id, Array.from(arguments))
+  var spec = JSON.parse(arg.rpcified.manifest)
   var MockConstructor = function () {}
   spec.methods.forEach((key) => {
-    MockConstructor.prototype[key] = self.mockFunction(null, {
-      objectId: id,
-      method: key
-    })
+    MockConstructor.prototype[key] = self.mockFunction(null, id, key)
   })
   Object.defineProperty(MockConstructor, 'name', { value: spec.name })
   return new MockConstructor()
 }
 
 HypeRPC.prototype.prepareError = function (arg) {
-  return { message: arg.message }
+  return { error: JSON.stringify({ message: arg.message }) }
   // todo: somehow this does not alway work.
   // return Object.getOwnPropertyNames(arg).reduce((spec, name) => {
   //   spec[name] = arg[name]
@@ -312,7 +341,8 @@ HypeRPC.prototype.prepareError = function (arg) {
   // }, {})
 }
 
-HypeRPC.prototype.resolveError = function (spec, id) {
+HypeRPC.prototype.resolveError = function (arg, id) {
+  var spec = JSON.parse(arg.error)
   var err = new Error()
   Object.getOwnPropertyNames(spec).map((name) => {
     err[name] = spec[name]
@@ -322,14 +352,22 @@ HypeRPC.prototype.resolveError = function (spec, id) {
 
 HypeRPC.prototype.prepareCallback = function (arg, id) {
   this.callbacks[id] = arg
-  return id
+  return { callback: id }
 }
 
-HypeRPC.prototype.resolveCallback = function (id) {
+HypeRPC.prototype.resolveCallback = function (arg) {
   var self = this
+  var id = arg.callback
   return function () {
     var args = self.prepareArgs(id, Array.from(arguments))
-    self.send.push([FULFIL_CALLBACK, id, args])
+    self.sendMsg({
+      type: m.TYPE.RETURN,
+      return: {
+        type: m.RETURN.CALLBACK,
+        id,
+        args
+      }
+    })
   }
 }
 
@@ -346,11 +384,11 @@ HypeRPC.prototype.prepareStream = function (stream, id) {
     pump(wsT, maybeConvert(false, objectMode), stream)
   }
 
-  return [type, objectMode]
+  return { stream: { type, objectMode } }
 }
 
-HypeRPC.prototype.resolveStream = function (spec, id) {
-  var [type, objectMode] = spec
+HypeRPC.prototype.resolveStream = function (arg, id) {
+  var { type, objectMode } = arg.stream
   var ds = objectMode ? duplexify.obj() : duplexify()
 
   if (type & READABLE) {
@@ -369,12 +407,12 @@ HypeRPC.prototype.resolveStream = function (spec, id) {
   return ds
 }
 
-HypeRPC.prototype.prepareBuffer = function (buf) {
-  return buf.toString('ascii')
+HypeRPC.prototype.prepareBuffer = function (arg) {
+  return { bytes: arg }
 }
 
-HypeRPC.prototype.resolveBuffer = function (string) {
-  return Buffer.from(string, 'ascii')
+HypeRPC.prototype.resolveBuffer = function (arg) {
+  return arg.bytes
 }
 
 HypeRPC.prototype.onstream = function (sT, name) {
@@ -413,12 +451,18 @@ HypeRPC.prototype.toLog = function (name) {
 
 HypeRPC.prototype.log = function (...args) {
   if (!this.debug) return
+  if (!this.__logger) {
+    try {
+      this.__logger = require('debug')('hyperpc')
+    } catch (e) {
+      this.__logger = console.log
+    }
+  }
   var s = this.prefix + (this.name ? `=${this.name}` : '')
-  console.log('rpcstream [%s]:', s, ...args)
+  this.__logger('rpcstream [%s]:', s, ...args)
 }
 
 // Pure helpers.
-
 function joinIds (...ids) {
   return ids.join(SEPERATOR)
 }

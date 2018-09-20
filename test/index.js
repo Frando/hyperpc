@@ -248,7 +248,7 @@ tape('read and write back and forth', function (t) {
 })
 
 tape.skip('duplex stream solo', function (t) {
-  var i = 0
+  // var i = 0
   var buf = ['precr']
   var ds = new stream.Duplex({
     read () {
@@ -264,8 +264,8 @@ tape.skip('duplex stream solo', function (t) {
       buf.push(chunk.toString())
     }
   })
-  var transport1 = through()
-  var transport2 = through()
+  // var transport1 = through()
+  // var transport2 = through()
   // var rs = new stream.Readable({read () {}})
   // var ws = new stream.Writable({write () {}})
   var rs = through()
@@ -368,7 +368,7 @@ tape('nested callbacks', function (t) {
   var api = {
     process: function (method, prefix, onFoo, onBar) {
       function toUpper (str, cb) {
-        cb(prefix + str.toUpperCase())
+        cb(null, prefix + str.toUpperCase())
       }
       if (method === 'foo') onFoo(toUpper)
       if (method === 'bar') onBar(toUpper)
@@ -383,13 +383,15 @@ tape('nested callbacks', function (t) {
     api.process('foo', 'test', onFoo)
     api.process('bar', 'ba', onFoo, onBar)
     function onFoo (remoteUpper) {
-      remoteUpper('yeah', (res) => {
+      remoteUpper('yeah', (err, res) => {
+        t.error(err)
         t.equal(res, 'testYEAH')
         maybeEnd()
       })
     }
     function onBar (remoteUpper) {
-      remoteUpper('boo', (res) => {
+      remoteUpper('boo', (err, res) => {
+        t.error(err)
         t.equal(res, 'baBOO')
         maybeEnd()
       })
@@ -405,7 +407,6 @@ tape('nested callbacks', function (t) {
 tape('promises', function (t) {
   var api = {
     promtest: function (str) {
-      console.log('promtest on server', str)
       return new Promise((resolve, reject) => {
         if (str) resolve(str.toUpperCase())
         else reject(new Error('no foo'))
@@ -486,7 +487,6 @@ tape('buffer encoding/decoding', function (t) {
       t.end()
     })
   })
-
 })
 
 //     var ApiObj = api.ApiObj('foo')
@@ -495,7 +495,6 @@ tape('buffer encoding/decoding', function (t) {
 //       t.equal(str, 'fooBAR')
 //     })
 //   })
-
 
 // var proxy = require('./proxy')
 // tape('object proxy', function (t) {

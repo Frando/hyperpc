@@ -29,8 +29,8 @@ tape('rpcify objects', function (t) {
     myclass: rpcify(MyClass)
   }
 
-  var server = rpc(api, {name: 'server', log: true})
-  var client = rpc(null, {name: 'client', log: true})
+  var server = rpc(api, {name: 'server', debug: true})
+  var client = rpc(null, {name: 'client', debug: true})
 
   pump(server, client, server)
 
@@ -106,10 +106,10 @@ tape('limit api', function (t) {
 tape('check access', function (t) {
   var api = {
     upper: (str, cb) => cb(null, str.toUpperCase()),
-    myclass: rpcify(MyClass, { check: check })
+    myclass: rpcify(MyClass, { access: access })
   }
 
-  function check (obj, method, args) {
+  function access (obj, method, args) {
     if (method === 'setPrefix' && args[0] === 'forbidden') return false
     else return true
   }
@@ -142,8 +142,8 @@ tape('return rpcified objects', function (t) {
       cb(null, rpcify(obj[id]))
     }
   }
-  var server = rpc(api)
-  var client = rpc()
+  var server = rpc(api, {debug: true})
+  var client = rpc(null, {debug: true})
   pump(server, client, server)
   client.on('remote', (remote) => {
     remote.getObj('first', (err, obj) => {

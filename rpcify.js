@@ -1,79 +1,103 @@
+// var debug = require('debug')('rpcify')
 
-function RPCify (constructor, opts) {
-  if (!(this instanceof RPCify)) return new RPCify(constructor, opts)
+function RPCify (obj, opts) {
+  if (!(this instanceof RPCify)) return new RPCify(obj, opts)
 
-  this.Cr = constructor
   this.opts = Object.assign({
     skipPrivate: true,
     include: null,
     exclude: [],
     override: {},
     factory: null,
-    check: null
+    name: null
   }, opts)
+
+  opts = this.opts
+  this.access = opts.access || function () { return true }
+  this.override = opts.override || {}
   this.cache = {}
+
+  if (obj.prototype) {
+    // 1. Class (prototype)
+
+    if (opts.factory) this.facory = opts.factory
+    else if (obj.__hyperpcFactory) this.factory = obj.__hyperpcFactory
+    else this.factory = makeDefaultFactory(obj)
+
+    this.instance = null
+    this.name = obj.name
+    this.funcs = getAllFuncs(obj.prototype)
+  } else {
+    // 2. Object instance
+
+    this.factory = null
+    this.instance = obj
+    this.name = Object.getPrototypeOf(obj).name
+    this.funcs = getAllFuncs(obj)
+  }
+
+  var out = ['constructor']
+  if (opts.exclude) out = out.concat(opts.exclude)
+
+  this.filteredFuncs = this.funcs.filter(f => {
+    if (opts.include && opts.include.indexOf(f) === -1) return false
+    if (out.indexOf(f) !== -1) return false
+    if (opts.skipPrivate && f.substr(0, 1) === '_') return false
+    return true
+  })
 }
 
 RPCify.prototype.toManifest = function () {
-  var methods = []
-  var keys
-
-  var proto = this.Cr.prototype
-  if (!proto) proto = Object.getPrototypeOf(this.Cr)
-
-  if (this.opts.include) keys = this.opts.include
-  else {
-    keys = Object.keys(proto).filter((key) => {
-      if (this.opts.include) {
-        return this.opts.include.indexOf(key) !== -1
-      }
-      if (this.opts.skipPrivate && key.substr(0, 1) ==='_') {
-        return false
-      }
-      if (this.opts.exclude.indexOf(key) !== -1) {
-        return false
-      }
-      return true
-    })
-  }
-
-  keys.forEach((key) => {
-    if (typeof proto[key] === 'function') {
-      methods.push(key)
-    }
-  })
-
   var ret = {
-    name: this.Cr.name,
-    methods
+    name: this.name,
+    methods: this.filteredFuncs
   }
+  // debug('manifest', ret)
+
   return ret
 }
 
 RPCify.prototype.makeNew = function (id, args) {
-  var obj
-  if (this.opts.factory) {
-    obj = this.opts.factory(...args)
-  } else {
-    obj = new this.Cr(...args)
+  // debug('makeNew', id, args)
+  if (this.instance) return this.instance
+  else {
+    var obj = this.factory(...args)
+    this.cache[id] = obj
+    return obj
   }
-  this.cache[id] = obj
-  return obj
 }
 
-RPCify.prototype.makeCall = function (method, args) {
-  var [id, name] = method
-  if (!this.cache[id]) return
-  if (this.opts.check) {
-    // todo: Implement returning errors from check callback.
-    var result = this.opts.check(this.cache[id], name, args)
-    if (!result) return
+RPCify.prototype.makeCall = function (method, id, args) {
+  // debug('makeCall', method, id, args)
+  var instance
+  if (this.instance) instance = this.instance
+  else if (id && this.cache[id]) instance = this.cache[id]
+  else return null
+
+  if (!this.access(instance, method, args)) return null
+
+  if (this.opts.override[method]) this.opts.override[method].apply(instance, args)
+  else instance[method].apply(instance, args)
+  // debug('makeCall - call: %O', instance[method])
+}
+
+function makeDefaultFactory (Obj) {
+  return function (...args) {
+    return new Obj(...args)
   }
-  if (this.opts.override[name]) {
-    this.opts.override[name].apply(this.cache[id], args)
-  } else {
-    this.cache[id][name].apply(this.cache[id], args)
+}
+
+function getAllFuncs (obj) {
+  var props = []
+  var cur = obj
+
+  while (Object.getPrototypeOf(cur)) {
+    Object.getOwnPropertyNames(cur).forEach(prop => {
+      if (props.indexOf(prop) === -1) props.push(prop)
+    })
+    cur = Object.getPrototypeOf(cur)
   }
+  return props
 }
 
 module.exports = RPCify

@@ -1,0 +1,87 @@
+enum TYPE {
+  MANIFEST = 1;
+  CALL = 2;
+  RETURN = 3;
+}
+
+enum CALL {
+  API = 1;
+  OBJECT = 2;
+}
+
+enum RETURN {
+  CALLBACK = 1;
+  PROMISE = 2;
+}
+
+enum PROMISE {
+  RESOLVE = 0;
+  REJECT = 1;
+}
+
+enum ARGUMENT {
+  BYTES = 1;
+  JSON = 2;
+  CALLBACK = 3;
+  RPCIFIED = 4;
+  STREAM = 5;
+  ERROR = 6;
+}
+
+enum STREAM {
+  READABLE = 1;
+  WRITEABLE = 2;
+  DUPLEX = 3;
+}
+
+message Arg {
+  message Rpcified {
+    required string manifest = 1;
+    // required string objectid = 2;
+  }
+
+  message Stream {
+    required STREAM type = 1;
+    required bool objectMode = 2;
+  }
+
+  required ARGUMENT type = 1;
+  oneof payload {
+    bytes bytes = 2;
+    string json = 3;
+    string callback = 4;
+    Rpcified rpcified = 5;
+    Stream stream = 6;
+    string error = 7;
+  }
+}
+
+message Call {
+  required CALL type = 1;
+  required string id = 2;
+  optional string name = 3;
+  optional string objectid = 4;
+  optional string method = 5;
+  repeated Arg args = 6;
+}
+
+message Return {
+  required RETURN type = 1;
+  required string id = 2;
+  optional PROMISE promise = 3;
+  repeated Arg args = 4;
+}
+
+message Manifest {
+  required string manifest = 1;
+  required uint64 nonce = 2;
+}
+
+message Msg {
+  required TYPE type = 1;
+  oneof msg {
+    Manifest manifest = 2;
+    Call call = 3;
+    Return return = 4;
+  }
+}
