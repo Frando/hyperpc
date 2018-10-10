@@ -1,27 +1,38 @@
 // var debug = require('debug')('rpcify')
 
 function RPCify (obj, opts) {
+  if (!obj) return null
   if (!(this instanceof RPCify)) return new RPCify(obj, opts)
+  opts = opts || {}
 
-  this.opts = Object.assign({
+  var defaults = {
     skipPrivate: true,
     include: null,
     exclude: [],
     override: {},
     factory: null,
-    name: null
-  }, opts)
+    name: null,
+    access: function () { return true }
+  }
 
-  opts = this.opts
-  this.access = opts.access || function () { return true }
-  this.override = opts.override || {}
+  if (obj.__hyperpc) {
+    this.opts = Object.assign(defaults, obj.__hyperpc, opts)
+  } else if (obj.prototype && obj.prototype.__hyperpc) {
+    this.opts = Object.assign(defaults, obj.prototype.__hyperpc, opts)
+  } else if (!obj.prototype && Object.getPrototypeOf(obj) && Object.getPrototypeOf(obj).__hyperpc) {
+    this.opts = Object.assign(defaults, Object.getPrototypeOf(obj).__hyperpc, opts)
+  } else {
+    this.opts = Object.assign(defaults, opts)
+  }
+
+  this.access = this.opts.access
+  this.override = this.opts.override
   this.cache = {}
 
   if (obj.prototype) {
     // 1. Class (prototype)
 
-    if (opts.factory) this.facory = opts.factory
-    else if (obj.__hyperpcFactory) this.factory = obj.__hyperpcFactory
+    if (opts.factory) this.factory = opts.factory
     else this.factory = makeDefaultFactory(obj)
 
     this.instance = null
@@ -37,12 +48,12 @@ function RPCify (obj, opts) {
   }
 
   var out = ['constructor']
-  if (opts.exclude) out = out.concat(opts.exclude)
+  if (this.opts.exclude) out = out.concat(this.opts.exclude)
 
   this.filteredFuncs = this.funcs.filter(f => {
-    if (opts.include && opts.include.indexOf(f) === -1) return false
+    if (this.opts.include && this.opts.include.indexOf(f) === -1) return false
     if (out.indexOf(f) !== -1) return false
-    if (opts.skipPrivate && f.substr(0, 1) === '_') return false
+    if (this.opts.skipPrivate && f.substr(0, 1) === '_') return false
     return true
   })
 }
@@ -63,12 +74,10 @@ RPCify.prototype.makeNew = function (id, args) {
   else {
     var obj = this.factory(...args)
     this.cache[id] = obj
-    return obj
   }
 }
 
 RPCify.prototype.makeCall = function (method, id, args) {
-  // debug('makeCall', method, id, args)
   var instance
   if (this.instance) instance = this.instance
   else if (id && this.cache[id]) instance = this.cache[id]
@@ -76,8 +85,11 @@ RPCify.prototype.makeCall = function (method, id, args) {
 
   if (!this.access(instance, method, args)) return null
 
-  if (this.opts.override[method]) this.opts.override[method].apply(instance, args)
-  else instance[method].apply(instance, args)
+  if (this.opts.override[method]) {
+    return this.opts.override[method].apply(instance, args)
+  } else {
+    return instance[method].apply(instance, args)
+  }
   // debug('makeCall - call: %O', instance[method])
 }
 

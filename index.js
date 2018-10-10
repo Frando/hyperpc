@@ -223,7 +223,12 @@ HypeRPC.prototype.onCall = function (msg) {
       break
   }
 
-  if (this.promise && isPromise(ret)) this.preparePromise(id, ret)
+  if (this.promise) {
+    var promise
+    if (isPromise(ret)) promise = ret
+    else promise = new Promise((resolve, reject) => resolve(ret))
+    this.preparePromise(id, promise)
+  }
 }
 
 HypeRPC.prototype.onReturn = function (msg) {
@@ -238,6 +243,7 @@ HypeRPC.prototype.onReturn = function (msg) {
       break
     case m.RETURN.PROMISE:
       var promise = this.promises[id]
+      if (!promise) return
       var res = msg.promise
       promise[res].apply(promise[res], args)
       break
@@ -291,7 +297,7 @@ HypeRPC.prototype.convertArgs = function (step, id, args) {
     [m.ARGUMENT.CALLBACK, isFunc, this.prepareCallback, this.resolveCallback],
     [m.ARGUMENT.STREAM, isStream, this.prepareStream, this.resolveStream],
     [m.ARGUMENT.BYTES, isBuffer, this.prepareBuffer, this.resolveBuffer],
-    [m.ARGUMENT.JSON, () => true, (arg) => ({ json: JSON.stringify(arg) }), (arg) => JSON.parse(arg.json)]
+    [m.ARGUMENT.JSON, () => true, this.prepareJson, this.resolveJson]
   ]
 
   return args.map((arg, i) => STEPS[step](arg, id, i))
@@ -309,6 +315,24 @@ HypeRPC.prototype.convertArgs = function (step, id, args) {
   function resolveArg (arg, id, i) {
     var group = CONVERSION_MAP.filter(group => group[0] === arg.type)[0]
     return group[RESOLVE].apply(self, [arg, joinIds(id, i)])
+  }
+}
+
+HypeRPC.prototype.prepareJson = function (arg) {
+  try {
+    return { json: JSON.stringify(arg) }
+  } catch (e) {
+    this.log('JSON encoding error.')
+    return { json: null }
+  }
+}
+
+HypeRPC.prototype.resolveJson = function (arg) {
+  if (!arg.json) return null
+  try {
+    return JSON.parse(arg.json)
+  } catch (e) {
+    return null
   }
 }
 
@@ -333,7 +357,7 @@ HypeRPC.prototype.resolveRpcified = function (arg, id) {
 }
 
 HypeRPC.prototype.prepareError = function (arg) {
-  return { error: JSON.stringify({ message: arg.message }) }
+  return { error: JSON.stringify({ message: arg.toString() }) }
   // todo: somehow this does not alway work.
   // return Object.getOwnPropertyNames(arg).reduce((spec, name) => {
   //   spec[name] = arg[name]
@@ -490,7 +514,7 @@ function isPromise (obj) {
 }
 
 function isStream (obj) {
-  return obj instanceof stream.Stream
+  return obj instanceof stream.Stream || (isObject(obj) && obj && (obj._readableState || obj._writableState))
 }
 
 function isReadable (obj) {

@@ -438,7 +438,7 @@ tape('promises', function (t) {
         var bar = await api.promtestAsync(val)
         t.equal(bar, 'TEST', 'async await works')
       } catch (err) {
-        t.equal(err.message, 'no foo', 'rejection works')
+        t.equal(err.message, 'Error: no foo', 'rejection works')
         t.end()
       }
     })
